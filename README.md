@@ -1,8 +1,23 @@
+# Use MSK (AWS managed stream for Kafka) usage demo stacks.
+
+Reference blog:
 https://aws.amazon.com/blogs/big-data/stream-twitter-data-into-amazon-redshift-using-amazon-msk-and-aws-glue-streaming-etl/
+
 JSON Code Ref:
 https://cloudformation-template-repo.s3.amazonaws.com/Kafka_Streaming_ETL_Redshift.json
 
+
+I have modified their solution and fixed quite a few bugs
+
+The `template.yaml` is to use MSK with Glue Jobs to transform and save to a Redshift cluster
+
+The `template-3az.yaml` is just to use 3 AZ (availability zones), rather than 2 AZ in the template.yaml
+
+The `template-lambda.yaml` is to use MSK with a lambda. 
+That lambda has to use proper SG and subnet config in order to call the MSK 
+
 ```
+stack_name=msk-demo-stack
 aws cloudformation create-stack \
   --stack-name "$stack_name" \
   --template-body file://template.yaml \
@@ -11,6 +26,9 @@ aws cloudformation create-stack \
 
 
 Commands:
+
+# these can be done on the EC2 instances, just find its public IP and ssh to it
+# assuming you already passed your public IP when you call create-stack command above
 
 # download jq to /usr/bin
 sudo curl -qL -o /usr/bin/jq https://stedolan.github.io/jq/download/linux64/jq && chmod +x /usr/bin/jq

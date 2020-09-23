@@ -1,0 +1,10 @@
+[{
+    "id_str": "001",
+    "created_at": "2020-09-31 01:02:03",
+    "source": "test@example.com",
+    "text": "Male",
+    "user_location": "random place location",
+    "`entities_hashtags[0].text`": "tag0",
+    "`entities_hashtags[1].text`": "tag1",
+    "lang": "Eng"
+  }]

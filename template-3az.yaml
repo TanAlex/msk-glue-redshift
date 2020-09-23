@@ -1,0 +1,474 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Parameters:
+  KeyName:
+    Description: Select an existing EC2 KeyPair to enable SSH access to the instance
+    Type: AWS::EC2::KeyPair::KeyName
+    ConstraintDescription: Can contain only ASCII characters.
+  SSHLocation:
+    Description: The IP address range that can be used to SSH to the EC2 instances
+    Type: String
+    MinLength: '9'
+    MaxLength: '18'
+    AllowedPattern: "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
+    ConstraintDescription: Must be a valid IP CIDR range of the form x.x.x.x/x
+Mappings:
+  SubnetConfig:
+    VPC:
+      CIDR: 10.10.0.0/16
+    PublicOne:
+      CIDR: 10.10.16.0/20
+    PrivateOne:
+      CIDR: 10.10.64.0/20
+    PrivateTwo:
+      CIDR: 10.10.80.0/20
+    PrivateThree:
+      CIDR: 10.10.96.0/20
+  RegionAMI:
+    us-west-1:
+      HVM64: ami-0019ef04ac50be30f
+    us-east-1:
+      HVM64: ami-0c6b1d09930fac512
+    us-west-2:
+      HVM64: ami-0cb72367e98845d43
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      CidrBlock:
+        Fn::FindInMap:
+        - SubnetConfig
+        - VPC
+        - CIDR
+      Tags:
+      - Key: Name
+        Value: MSK-GLUE-VPC
+    Metadata:
+      AWS::CloudFormation::Designer:
+        id: e191108b-e241-404a-bed2-b2863bcd5235
+  PublicSubnetOne:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone:
+        Fn::Select:
+        - 0
+        - Fn::GetAZs:
+            Ref: AWS::Region
+      VpcId:
+        Ref: VPC
+      CidrBlock:
+        Fn::FindInMap:
+        - SubnetConfig
+        - PublicOne
+        - CIDR
+      MapPublicIpOnLaunch: true
+      Tags:
+      - Key: Name
+        Value: MMPublicSubnet
+  PrivateSubnetOne:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone:
+        Fn::Select:
+        - 0
+        - Fn::GetAZs:
+            Ref: AWS::Region
+      VpcId:
+        Ref: VPC
+      CidrBlock:
+        Fn::FindInMap:
+        - SubnetConfig
+        - PrivateOne
+        - CIDR
+      Tags:
+      - Key: Name
+        Value: MMPrivateSubnetOne
+  PrivateSubnetTwo:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone:
+        Fn::Select:
+        - 1
+        - Fn::GetAZs:
+            Ref: AWS::Region
+      VpcId:
+        Ref: VPC
+      CidrBlock:
+        Fn::FindInMap:
+        - SubnetConfig
+        - PrivateTwo
+        - CIDR
+      Tags:
+      - Key: Name
+        Value: MMPrivateSubnetTwo
+  PrivateSubnetThree:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone:
+        Fn::Select:
+        - 2
+        - Fn::GetAZs:
+            Ref: AWS::Region
+      VpcId:
+        Ref: VPC
+      CidrBlock:
+        Fn::FindInMap:
+        - SubnetConfig
+        - PrivateThree
+        - CIDR
+      Tags:
+      - Key: Name
+        Value: MMPrivateSubnetThree
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+  GatewayAttachement:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId:
+        Ref: VPC
+      InternetGatewayId:
+        Ref: InternetGateway
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VPC
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: GatewayAttachement
+    Properties:
+      RouteTableId:
+        Ref: PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId:
+        Ref: InternetGateway
+  PublicSubnetOneRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: PublicSubnetOne
+      RouteTableId:
+        Ref: PublicRouteTable
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VPC
+  PrivateSubnetOneRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: PrivateRouteTable
+      SubnetId:
+        Ref: PrivateSubnetOne
+  PrivateSubnetTwoRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: PrivateRouteTable
+      SubnetId:
+        Ref: PrivateSubnetTwo
+  PrivateSubnetThreeRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: PrivateRouteTable
+      SubnetId:
+        Ref: PrivateSubnetThree
+  KafkaClientInstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable SSH access via port 22
+      VpcId:
+        Ref: VPC
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 22
+        ToPort: 22
+        CidrIp:
+          Ref: SSHLocation
+      - IpProtocol: tcp
+        FromPort: 5439
+        ToPort: 5439
+        CidrIp: 
+          Fn::FindInMap:
+          - SubnetConfig
+          - VPC
+          - CIDR
+  MSKSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable SSH access via port 22
+      VpcId:
+        Ref: VPC
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 2181
+        ToPort: 2181
+        SourceSecurityGroupId:
+          Fn::GetAtt:
+          - KafkaClientInstanceSecurityGroup
+          - GroupId
+      - IpProtocol: tcp
+        FromPort: 9094
+        ToPort: 9094
+        SourceSecurityGroupId:
+          Fn::GetAtt:
+          - KafkaClientInstanceSecurityGroup
+          - GroupId
+      - IpProtocol: tcp
+        FromPort: 9092
+        ToPort: 9092
+        SourceSecurityGroupId:
+          Fn::GetAtt:
+          - KafkaClientInstanceSecurityGroup
+          - GroupId
+      - IpProtocol: tcp
+        FromPort: 5439
+        ToPort: 5439
+        CidrIp: 
+          Fn::FindInMap:
+            - SubnetConfig
+            - VPC
+            - CIDR
+  SGBaseIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId:
+        Ref: MSKSecurityGroup
+      IpProtocol: tcp
+      FromPort: 0
+      ToPort: 65535
+      SourceSecurityGroupId:
+        Fn::GetAtt:
+        - MSKSecurityGroup
+        - GroupId
+  KafkaClientEC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: m5.2xlarge
+      KeyName:
+        Ref: KeyName
+      IamInstanceProfile:
+        Ref: EC2InstanceProfile
+      AvailabilityZone:
+        Fn::Select:
+        - 0
+        - Fn::GetAZs:
+            Ref: AWS::Region
+      SubnetId:
+        Ref: PublicSubnetOne
+      SecurityGroupIds:
+      - Fn::GetAtt:
+        - KafkaClientInstanceSecurityGroup
+        - GroupId
+      ImageId:
+        Fn::FindInMap:
+        - RegionAMI
+        - Ref: AWS::Region
+        - HVM64
+      Tags:
+      - Key: Name
+        Value: KafkaClientInstance
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash -xe
+          exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
+          yum update -y
+          yum install python3.7 java-1.8.0-openjdk-devel -y
+          yum erase awscli -y
+          cd /opt/
+          wget https://archive.apache.org/dist/kafka/2.4.0/kafka_2.12-2.4.0.tgz
+
+          tar -xzf kafka_2.12-2.4.0.tgz
+          mv kafka_2.12-2.4.0 kafka 
+          cd /home/ec2-user 
+          wget https://bootstrap.pypa.io/get-pip.py 
+          python3.7 get-pip.py 
+          pip3 install boto3 
+          pip3 install awscli 
+          cd /opt
+          BASE_URL=$(wget -qO- https://nifi.apache.org/download.html | \
+          grep -Eo '(http|https)://[a-zA-Z0-9./?=_-]*' | grep -E 'bin.tar.gz' | head -1)
+
+          NIFI_URL=$(wget $BASE_URL -qO- https://nifi.apache.org/download.html | \
+          grep -Eo '(http|https)://[a-zA-Z0-9./?=_-]*' | grep -E 'bin.tar.gz' | head -1) 
+          NIFI_FILE=$(basename $NIFI_URL) 
+          NIFI_DIR=$(echo $NIFI_FILE| awk -F-bin.tar.gz '{print $1}')
+
+          sudo wget -O $NIFI_FILE $NIFI_URL 
+          sudo tar xvzf $NIFI_FILE
+          sudo mv $NIFI_DIR nifi
+          sudo ./nifi/bin/nifi.sh install
+          sudo sed -i "/java.arg.3=/ s/=.*/=-Xmx8000m/" ./nifi/conf/bootstrap.conf
+          sudo sed -i "/nifi.web.http.port=/ s/=.*/=8888/" ./nifi/conf/nifi.properties
+          sudo rm -rf /opt/nifi/conf/flow.xml.gz
+
+          sudo wget -P /opt/nifi/conf/ https://github.com/jobinthompu/StreamingETL/raw/master/flow.xml.gz
+
+          sudo ./nifi/bin/nifi.sh start
+          
+          cp /usr/lib/jvm/java-1.8.0-openjdk-1.8.0.*/jre/lib/security/cacerts /tmp/kafka.client.truststore.jks
+          echo "security.protocol=SSL" >> /opt/kafka/config/client.properties
+          echo "ssl.truststore.location=/tmp/kafka.client.truststore.jks" >> /opt/kafka/config/client.properties
+
+  GlueServiceRole:
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - glue.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole
+      - arn:aws:iam::aws:policy/AmazonMSKReadOnlyAccess
+      - arn:aws:iam::aws:policy/AmazonRedshiftReadOnlyAccess
+      RoleName: Glue_Service_Role
+    Type: AWS::IAM::Role
+  EC2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Sid: ''
+          Effect: Allow
+          Principal:
+            Service: ec2.amazonaws.com
+          Action: sts:AssumeRole
+      Path: "/"
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/AmazonMSKFullAccess
+      - arn:aws:iam::aws:policy/AWSCloudFormationReadOnlyAccess
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: EC2MSKProfiles
+      Roles:
+      - Ref: EC2Role
+  MSKCluster:
+    Type: AWS::MSK::Cluster
+    Properties:
+      BrokerNodeGroupInfo:
+        ClientSubnets:
+        - Ref: PrivateSubnetOne
+        - Ref: PrivateSubnetTwo
+        - Ref: PrivateSubnetThree
+        InstanceType: kafka.m5.large
+        SecurityGroups:
+        - Fn::GetAtt:
+          - MSKSecurityGroup
+          - GroupId
+        StorageInfo:
+          EBSStorageInfo:
+            VolumeSize: 200
+      ClusterName: MSKCluster
+      EncryptionInfo:
+        EncryptionInTransit:
+          ClientBroker: TLS_PLAINTEXT
+          InCluster: true
+      EnhancedMonitoring: PER_TOPIC_PER_BROKER
+      KafkaVersion: 2.2.1
+      NumberOfBrokerNodes: 3
+      # NumberOfBrokerNodes: 2
+  RedshiftCluster:
+    Type: AWS::Redshift::Cluster
+    DependsOn: MSKSecurityGroup
+    Properties:
+      ClusterType: single-node
+      NodeType: dc2.large
+      DBName: streaming-data
+      MasterUsername: awsuser
+      MasterUserPassword: Str0ngPas$wd
+      ClusterParameterGroupName:
+        Ref: RedshiftClusterParameterGroup
+      VpcSecurityGroupIds:
+      - Ref: MSKSecurityGroup
+      ClusterSubnetGroupName:
+        Ref: RedshiftClusterSubnetGroup
+      PubliclyAccessible: 'true'
+      Port: '5439'
+  RedshiftClusterParameterGroup:
+    Type: AWS::Redshift::ClusterParameterGroup
+    Properties:
+      Description: Cluster parameter group
+      ParameterGroupFamily: redshift-1.0
+      Parameters:
+      - ParameterName: enable_user_activity_logging
+        ParameterValue: 'true'
+  RedshiftClusterSubnetGroup:
+    Type: AWS::Redshift::ClusterSubnetGroup
+    Properties:
+      Description: Cluster subnet group
+      SubnetIds:
+      - Ref: PublicSubnetOne
+  VPCEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    DependsOn: MSKCluster
+    Properties:
+      RouteTableIds:
+      - Ref: PrivateRouteTable
+      - Ref: PublicRouteTable
+      ServiceName:
+        Fn::Sub: com.amazonaws.${AWS::Region}.s3
+      VpcEndpointType: Gateway
+      VpcId:
+        Ref: VPC
+Outputs:
+  VPCId:
+    Description: The ID of the VPC created
+    Value:
+      Ref: VPC
+  GlueServiceRoleID:
+    Description: The name of the Glue Service Role created
+    Value:
+      Ref: GlueServiceRole
+  PublicSubnetOne:
+    Description: The name of the public subnet created
+    Value:
+      Ref: PublicSubnetOne
+  PrivateSubnetOne:
+    Description: The ID of private subnet one created
+    Value:
+      Ref: PrivateSubnetOne
+  PrivateSubnetTwo:
+    Description: The ID of private subnet two created
+    Value:
+      Ref: PrivateSubnetTwo
+  PrivateSubnetThree:
+    Description: The ID of private subnet three created
+    Value:
+      Ref: PrivateSubnetThree
+  MSKSecurityGroupID:
+    Description: The ID of the security group created for the MSK clusters
+    Value:
+      Fn::GetAtt:
+      - MSKSecurityGroup
+      - GroupId
+  KafkaNiFiEC2Instance:
+    Description: The Public DNS for the NiFi EC2 instance
+    Value:
+      Fn::GetAtt:
+      - KafkaClientEC2Instance
+      - PublicDnsName
+  MSKClusterArn:
+    Description: The Arn for the MSKMMCluster1 MSK cluster
+    Value:
+      Ref: MSKCluster
+  RedshiftEndpoint:
+    Description: Redshift Cluster endpoint
+    Value:
+      Fn::Join:
+      - ":"
+      - - Fn::GetAtt:
+          - RedshiftCluster
+          - Endpoint.Address
+        - Fn::GetAtt:
+          - RedshiftCluster
+          - Endpoint.Port
+
